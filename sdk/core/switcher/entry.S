@@ -204,10 +204,10 @@ compartment_switcher_entry:
 	cjr                cs0
 .Lzero_arguments_start:
 	zeroRegisters      a0, a1, a2, a3, a4, a5, t0
-	// Enable interrupts of the interrupt-disable bit is not set in flags
-	bnez               t1, .Lskip_interrupt_disable
-	csrsi              mstatus, 0x8
-.Lskip_interrupt_disable:
+	// Disable interrupts if the interrupt-disable bit is  set in flags
+	beqz               t1, .Lskip_interrupt_enable
+	csrci              mstatus, 0x8
+.Lskip_interrupt_enable:
 	// Registers passed to the callee are:
 	// c1 (ra), c2 (csp), and c3 (cgp) are passed unconditionally.
 	// ca0-ca5 (c10-c15) and ct0 (c5) are either passed as arguments or cleared
