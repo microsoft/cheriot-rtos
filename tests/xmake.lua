@@ -22,6 +22,8 @@ function test_c(name)
          add_files(name .. "-test.c")
 end
 
+-- Test the hardware
+test('isa')
 -- Test the allocator and the revoker.
 test("allocator")
 -- Test the thread pool
@@ -76,6 +78,7 @@ firmware("test-suite")
     -- Helper libraries
     add_deps("freestanding", "string", "crt", "cxxrt", "atomic")
     -- Tests
+    add_deps("isa_test")
     add_deps("allocator_test")
     add_deps("thread_pool_test")
     add_deps("futex_test")

@@ -127,7 +127,7 @@ namespace
 		template<typename T>
 		__always_inline void append(CHERI::Capability<T> capability)
 		{
-			append(static_cast<const void *>(capability.get()));
+			append(reinterpret_cast<const void *>(capability.get()));
 		}
 
 		/**
