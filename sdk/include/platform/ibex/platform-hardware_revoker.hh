@@ -162,7 +162,7 @@ namespace Ibex
 				// futex word with respect to the read of the revocation epoch.
 				__c11_atomic_signal_fence(__ATOMIC_SEQ_CST);
 				// If the requested epoch has finished, return success.
-				if (has_revocation_finished_for_epoch<true>(epoch))
+				if (has_revocation_finished_for_epoch(epoch))
 				{
 					return true;
 				}
@@ -171,7 +171,7 @@ namespace Ibex
 				// There is a possible race: if the revocation pass finished
 				// before we requested the interrupt, we won't get the
 				// interrupt.  Check again before we wait.
-				if (has_revocation_finished_for_epoch<true>(epoch))
+				if (has_revocation_finished_for_epoch(epoch))
 				{
 					return true;
 				}
