@@ -300,7 +300,8 @@ namespace loader
 		/**
 		 * Helper for encapsulating an address range.
 		 */
-		struct __packed AddressRange
+		template<size_t Shift>
+		struct __packed ShiftedAddressRange
 		{
 			/**
 			 * Start address.
@@ -325,9 +326,11 @@ namespace loader
 			 */
 			[[nodiscard]] size_t size() const
 			{
-				return smallSize;
+				return size_t(smallSize) << Shift;
 			}
 		};
+
+		using AddressRange = ShiftedAddressRange<0>;
 
 		static_assert(RawAddressRange<AddressRange>,
 		              "AddressRange should be a raw address range");
@@ -441,7 +444,7 @@ namespace loader
 			/**
 			 * The compartment's globals.
 			 */
-			AddressRange data;
+			ShiftedAddressRange<2> data;
 
 			/**
 			 * The distance from the start of the code region to the end of the
@@ -612,7 +615,7 @@ namespace loader
 			// This is a random 32-bit number and should be changed whenever
 			// the compartment header layout changes to provide some sanity
 			// checking.
-			return magic == 0x6cef3879;
+			return magic == 0x46391da0;
 		}
 
 		/**
@@ -707,7 +710,7 @@ namespace loader
 			/**
 			 * The (mutable) data section for this compartment.
 			 */
-			AddressRange data;
+			ShiftedAddressRange<2> data;
 
 			/**
 			 * The size in bytes of the data section that is initialised

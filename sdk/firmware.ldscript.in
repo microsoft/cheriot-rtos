@@ -181,7 +181,7 @@ SECTIONS
 		# Scheduler globals start address
 		LONG(.scheduler_globals);
 		# Scheduler globals end size
-		SHORT(SIZEOF(.scheduler_globals));
+		SHORT(SIZEOF(.scheduler_globals) / 4);
 		# Size of the scheduler import table
 		SHORT(.scheduler_import_end - .scheduler_start);
 		# Address of scheduler export table
@@ -200,7 +200,7 @@ SECTIONS
 		# Allocator globals start address
 		LONG(.allocator_globals);
 		# Allocator globals end
-		SHORT(SIZEOF(.allocator_globals));
+		SHORT(SIZEOF(.allocator_globals) / 4);
 		# Size of the allocator import table
 		SHORT(.allocator_import_end - .allocator_start);
 		# Address of allocator export table
@@ -236,7 +236,7 @@ SECTIONS
 		# loader versions.
 		# New versions of this can be generated with:
 		# head /dev/random | shasum | cut -c 0-8
-		LONG(0x6cef3879);
+		LONG(0x46391da0);
 		# Number of library headers.
 		SHORT(@library_count@);
 		# Number of compartment headers.
