@@ -528,7 +528,8 @@ rule("firmware")
 				"\n\t\tLONG(.${compartment}_export_table);" ..
 				"\n\t\tSHORT(.${compartment}_export_table_end - .${compartment}_export_table);" ..
 				"\n\t\tLONG(.${compartment}_globals);" ..
-				"\n\t\tSHORT(SIZEOF(.${compartment}_globals));" ..
+				"\n\t\tSHORT(SIZEOF(.${compartment}_globals)/4);" ..
+				"\n\t\tASSERT(SIZEOF(.${compartment}_globals) < 0x40000, \"${compartment}'s globals are too large\");" ..
 				"\n\t\tSHORT(.${compartment}_bss_start - .${compartment}_globals);" ..
 				"\n\t\tLONG(.${compartment}_cap_relocs_start);" ..
 				"\n\t\tSHORT(.${compartment}_cap_relocs_end - .${compartment}_cap_relocs_start);" ..
@@ -652,7 +653,7 @@ rule("firmware")
 				"\n\t\tLONG(.software_revoker_start);" ..
 				"\n\t\tSHORT(.software_revoker_end - .software_revoker_start);" ..
 				"\n\t\tLONG(.software_revoker_globals);" ..
-				"\n\t\tSHORT(SIZEOF(.software_revoker_globals));" ..
+				"\n\t\tSHORT(SIZEOF(.software_revoker_globals) / 4);" ..
 				-- The import table offset is computed from the start by code
 				-- that assumes that the first two words are space for sealing
 				-- keys, so we set it to 16 here to provide a computed size of

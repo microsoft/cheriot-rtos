@@ -7,6 +7,12 @@
 #include <string.h>
 #include <timeout.h>
 
+namespace
+{
+	char       largeBuffer[4096];
+	const char LargeConstBuffer[4096] = "This is a large const buffer buffer.";
+} // namespace
+
 /**
  * Test timeouts.
  *
@@ -114,6 +120,23 @@ void check_pointer_utilities()
 
 void test_misc()
 {
+	CHERI::Capability largeRW{largeBuffer};
+	CHERI::Capability largeRO{LargeConstBuffer};
+	debug_log("RW: {}", largeRW);
+	debug_log("RO: {}", largeRO);
+	TEST(largeRW.length() == sizeof(largeBuffer),
+	     "Large buffer has the wrong size: {}",
+	     largeRW.length());
+	TEST(largeRO.length() == sizeof(LargeConstBuffer),
+	     "Large const buffer has the wrong size: {}",
+	     largeRO.length());
+	TEST(largeRW.is_valid(), "Large buffer is untagged");
+	TEST(largeRO.is_valid(), "Large const buffer is untagged");
+	TEST(largeRW.permissions().contains(CHERI::Permission::Store),
+	     "Large buffer is not writable: {}",
+	     largeRW);
+	TEST(!largeRO.permissions().contains(CHERI::Permission::Store),
+	     "Large const buffer is writable");
 	check_timeouts();
 	check_memchr();
 	check_pointer_utilities();
