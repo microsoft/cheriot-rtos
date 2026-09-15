@@ -24,6 +24,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#if __has_include(<platform-switcher_cpu_features.hh>)
+#	include <platform-switcher_cpu_features.hh>
+#endif
+
 using namespace CHERI;
 
 namespace
@@ -1080,6 +1084,10 @@ namespace
 			  build(compartment.exportTable);
 			// Special case: The first frame has the initial csp.
 			threadTStack->frames[0].csp = stack;
+
+#if __has_include(<platform-switcher_cpu_features.hh>)
+			threadTStack->frames[0].cpuFeatures = SWITCHER_CPU_FEATURE_DEFAULT;
+#endif
 
 			Debug::log("Thread's trusted stack is {}", threadTStack);
 
