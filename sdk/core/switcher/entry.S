@@ -485,7 +485,6 @@ __Z26compartment_switcher_entryz:
 	 *  t2, s1: dead (again)
 	 *  ra, gp: dead (still)
 	 */
-#ifdef CONFIG_MSHWM
 	// Read the stack high water mark (which is 16-byte aligned)
 	csrr               gp, CSR_MSHWM
 	// Skip zeroing if high water mark >= stack pointer
@@ -497,7 +496,6 @@ __Z26compartment_switcher_entryz:
 	 * is doing something bad.
 	 */
 	csetaddr           ct2, csp, gp
-#endif
 	zero_stack         /* base = */ t2, /* top = */ s0, /* scratch = */ gp
 .Lswitch_after_zero:
 	/*
@@ -595,10 +593,8 @@ __Z26compartment_switcher_entryz:
 	 * bounds, in light of the check we just performed.
 	 */
 	cincoffset 	       csp, csp, -STACK_ENTRY_RESERVED_SPACE
-#ifdef CONFIG_MSHWM
 	// store new stack top as stack high water mark
 	csrw               CSR_MSHWM, sp
-#endif
 
 	// Get the flags field into tp
 	clbu               tp, ExportEntry_offset_flags(ct1)
@@ -808,7 +804,6 @@ switcher_after_compartment_call:
 	clc                cra, SPILL_SLOT_pcc(csp)
 	clc                cgp, SPILL_SLOT_cgp(csp)
 	cincoffset         csp, csp, SPILL_SLOT_SIZE
-#ifdef CONFIG_MSHWM
 	/*
 	 * Read the stack high water mark, which is 16-byte aligned.  We will use
 	 * this as base address for stack clearing.  Note that it cannot be greater
@@ -816,15 +811,10 @@ switcher_after_compartment_call:
 	 * stack frame, and it is a monotonically non-increasing value.
 	 */
 	csrr               tp, CSR_MSHWM
-#else
-	cgetbase           tp, csp
-#endif
 	cgetaddr           t1, csp
 	csetaddr           ct2, csp, tp
 	zero_stack         t2, t1, tp
-#ifdef CONFIG_MSHWM
 	csrw               CSR_MSHWM, sp
-#endif
 
 	// Zero all registers not holding state intended for caller; see atlas below
 .Lswitch_callee_dead_zeros:
@@ -1003,12 +993,10 @@ exception_entry_asm:
 	csc                ct0, TrustedStack_offset_mepcc(csp)
 	csrr               t1, mstatus
 	csw                t1, TrustedStack_offset_mstatus(csp)
-#ifdef CONFIG_MSHWM
 	csrr               t1, CSR_MSHWM
 	csw                t1, TrustedStack_offset_mshwm(csp)
 	csrr               t1, CSR_MSHWMB
 	csw                t1, TrustedStack_offset_mshwmb(csp)
-#endif
 	csrr               t1, mcause
 	csw                t1, TrustedStack_offset_mcause(csp)
 	// Atlas update: t1: copy of mcause
@@ -1165,12 +1153,10 @@ exception_entry_asm:
 	 */
 	clw                ra, TrustedStack_offset_mstatus(csp)
 	csrw               mstatus, ra
-#ifdef CONFIG_MSHWM
 	clw                ra, TrustedStack_offset_mshwm(csp)
 	csrw               CSR_MSHWM, ra
 	clw                ra, TrustedStack_offset_mshwmb(csp)
 	csrw               CSR_MSHWMB, ra
-#endif
 	cspecialw          mepcc, ct2
 
 	/*
@@ -1640,7 +1626,6 @@ exception_entry_asm:
 
 	cspecialr          ct1, mtdc
 	// Atlas update: t1: pointer to TrustedStack
-#ifdef CONFIG_MSHWM
 	/*
 	 * Update the spilled copy of the stack high water mark to ensure that we
 	 * will clear all of the stack used by the error handler and the spilled
@@ -1648,7 +1633,6 @@ exception_entry_asm:
 	 */
 	csrr               t0, CSR_MSHWM
 	csw                t0, TrustedStack_offset_mshwm(ct1)
-#endif
 	clhu               tp, TrustedStack_offset_frameoffset(ct1)
 	addi               tp, tp, -TrustedStackFrame_size
 	// Atlas update: tp: pointer to the current available trusted stack frame.
