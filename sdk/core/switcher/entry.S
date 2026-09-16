@@ -6,6 +6,29 @@
 #include "misc-assembly.h"
 #include <errno.h>
 
+/*
+ * Platforms may provide an "interpreter" of the TrustedStack::cpuFeatures
+ * word.  These manifest as a pair of assembler macros:
+ *
+ * - `platform_switcher_cpu_features_mask newValue, scratch`
+ *
+ *   This is called within switcher_invocation_cpu_features_set to map to mask
+ *   out values beyond those understood by the platform.  It should update the
+ *   `newValue` register in place and may use `scratch` as a temporary.
+ *   `scratch` must not contain values unsafe to return to application code at
+ *   the end of this macro.
+ *
+ * - `platform_switcher_cpu_features_activate newValue, scratch`
+ *
+ *   This is called within switcher_invocation_cpu_features_set, thread switch,
+ *   and cross-return to bring a (necessarily masked) cpuFeatures value into
+ *   effect.  `scratch` may be used as as a temporary but must not contain
+ *   values unsafe to return to application code at the end of this macro.
+ */
+#if __has_include(<platform-switcher_cpu_features.hh>)
+#	include <platform-switcher_cpu_features.hh>
+#endif
+
 .include "assembly-helpers.s"
 
 #  Symbolic names for the stack high water mark registers until
@@ -117,6 +140,76 @@
  * result are also GL(obal).
  */
 
+/*
+ * "The TrustedStack Pointer Invariants"
+ *
+ * All purported, unsealed `TrustedStack *`-s held by the switcher and its
+ * library calls...
+ *
+ * - point to, and precisely bound, a `TrustedStack` structure
+ *
+ * - always have offset 0 (address equal to base)
+ *
+ * A proof sketch would rely on initial constructions, CHERI sealing semantics,
+ * and observing that the switcher never writes back or seals an offset
+ * `TrustedStack` pointer.
+ *
+ * TODO: For formal verification, prove that.  A full proof will require
+ * demonstrating that the (un)sealing rights for `TrustedStack` pointers do not
+ * escape the switcher, perhaps in tandem.
+ */
+/*
+ * "The TrustedStack::frameoffset Invariants"
+ *
+ * Assuming all threads begin execution with their `TrustedStack`-s obeying
+ *
+ *   `frameoffset == offsetof(TrustedStack, frames[1])`
+ *
+ * that is, with their initial frame filled out, this an invariant of all
+ * `TrustedStack`-s throughout the system's (and in particular the switcher's)
+ * execution.
+ *
+ * In fact, `frameoffset`-s will always satisfy, for some positive integer `k`
+ *
+ *   `frameoffset == offsetof(TrustedStack, frames)
+ *                   + k * sizeof(TrustedStackFrame)`
+ *
+ * It is therefore *always* safe to refer to fields of the frame at
+ * `frameoffset - sizeof(TrustedStackFrame)` within any `TrustedStack *` held by
+ * the swithcher.  Accesses to the frame at `frameoffset` must be checked for
+ * being "one past the end"; the switcher never advances `frameoffset` further.
+ * That is, for all `TrustedStack *ts` to which it has access,
+ *
+ *   `ts->frameoffset <= __builtin_cheri_length_get(ts)`
+ *
+ * is also an invariant.
+ *
+ * A proof sketch for the first would rely on `.frameoffset` being decreased
+ * only in `switcher_after_compartment_call`, which checks the value against
+ * `offsetof(TrustedStack, frames[0])`, not updating the value and jumping over
+ * to `.Lcommon_defer_irqs_and_thread_exit` if the new value would go below.
+ *
+ * A proof sketch for the last would rely on `.frameoffset` being increased only
+ * in `.Lswitch_trusted_stack_push`, which performs explicit comparison between
+ * the two sides of the invariant expression and writes the incremented value
+ * only if the current `.frameoffset` is strictly in bounds.
+ *
+ * A proof sketch for the middle invariant would rely on initial construction
+ * and the increment and decrements always being by `sizeof(TrustedStackFrame)`.
+ */
+
+/*
+ * Absolute symbols that we export for use by the linker scripts!
+ *
+ * sdk/xmake.lua enumerates trusted stacks in terms of the size of a
+ * TrustedStack, which includes the 0th TrustedStackFrame, and then the number
+ * of nested cross-calls supported.
+ */
+	.global __cheriot_switcher_trusted_stack_base_size
+__cheriot_switcher_trusted_stack_base_size = TrustedStack_size;
+
+	.global __cheriot_switcher_trusted_stack_frame_size
+__cheriot_switcher_trusted_stack_frame_size = TrustedStackFrame_size;
 
 switcher_code_start:
 
@@ -431,6 +524,14 @@ __Z26compartment_switcher_entryz:
 	 */
 	csc                cnull, TrustedStackFrame_offset_calleeExportTable(ctp)
 	/*
+	 * 4. Copying the current frame's cpuFeatures value forward into the new
+	 *    frame.  Because this value reflects the on-core value, no activation
+	 *    is required.
+	 */
+	clhu               s1, (TrustedStackFrame_offset_cpuFeatures - \
+	                           TrustedStackFrame_size)(ctp)
+	csh                s1, TrustedStackFrame_offset_cpuFeatures(ctp)
+	/*
 	 * Update the frame offset, using s1 to hold a scratch scalar.  Any fault
 	 * before this point (wrong target cap, unaligned stack, etc.) is seen as a
 	 * fault in the caller. After writing the new TrustedSstack::frameoffset,
@@ -473,7 +574,6 @@ __Z26compartment_switcher_entryz:
 	 *  t2, s1: dead (again)
 	 *  ra, gp: dead (still)
 	 */
-#ifdef CONFIG_MSHWM
 	// Read the stack high water mark (which is 16-byte aligned)
 	csrr               gp, CSR_MSHWM
 	// Skip zeroing if high water mark >= stack pointer
@@ -485,7 +585,6 @@ __Z26compartment_switcher_entryz:
 	 * is doing something bad.
 	 */
 	csetaddr           ct2, csp, gp
-#endif
 	zero_stack         /* base = */ t2, /* top = */ s0, /* scratch = */ gp
 .Lswitch_after_zero:
 	/*
@@ -583,10 +682,8 @@ __Z26compartment_switcher_entryz:
 	 * bounds, in light of the check we just performed.
 	 */
 	cincoffset 	       csp, csp, -STACK_ENTRY_RESERVED_SPACE
-#ifdef CONFIG_MSHWM
 	// store new stack top as stack high water mark
 	csrw               CSR_MSHWM, sp
-#endif
 
 	// Get the flags field into tp
 	clbu               tp, ExportEntry_offset_flags(ct1)
@@ -747,7 +844,7 @@ switcher_after_compartment_call:
 	clhu               t2, TrustedStack_offset_frameoffset(ctp)
 	li                 t0, TrustedStack_offset_frames
 	/*
-	 * 2. Decreasing frameoffset by one frame.  This will go below
+	 * 2. Decreasing frameoffset by one frame.  This will become equal to
 	 *    offsetof(TrustedStack, frames) if there are no active frames.
 	 */
 	addi               t2, t2, -TrustedStackFrame_size
@@ -766,6 +863,20 @@ switcher_after_compartment_call:
 	 *  t1: pointer to the TrustedStackFrame to bring on core
 	 *  t2: the TrustedStack::frameoffset associated with t1
 	 */
+
+#if __has_include(<platform-switcher_cpu_features.hh>)
+	/*
+	 * Restore the cpuFeatures value from the caller's frame.  This value is
+	 * presumed already masked, so we need not spend the instructions here.
+	 *
+	 * TODO: It isn't clear whether this would benefit from comparing against
+	 * the current value first.  We might hope that the gateware is doing that
+	 * comparison for us.
+	 */
+	clhu               s0, TrustedStackFrame_offset_cpuFeatures(ct1)
+	platform_switcher_cpu_features_activate s0, s1
+	// Atlas update: s0, s1: dead (again)
+#endif
 
 	/*
 	 * Restore the untrusted stack pointer from the trusted stack.  This points
@@ -796,7 +907,6 @@ switcher_after_compartment_call:
 	clc                cra, SPILL_SLOT_pcc(csp)
 	clc                cgp, SPILL_SLOT_cgp(csp)
 	cincoffset         csp, csp, SPILL_SLOT_SIZE
-#ifdef CONFIG_MSHWM
 	/*
 	 * Read the stack high water mark, which is 16-byte aligned.  We will use
 	 * this as base address for stack clearing.  Note that it cannot be greater
@@ -804,15 +914,10 @@ switcher_after_compartment_call:
 	 * stack frame, and it is a monotonically non-increasing value.
 	 */
 	csrr               tp, CSR_MSHWM
-#else
-	cgetbase           tp, csp
-#endif
 	cgetaddr           t1, csp
 	csetaddr           ct2, csp, tp
 	zero_stack         t2, t1, tp
-#ifdef CONFIG_MSHWM
 	csrw               CSR_MSHWM, sp
-#endif
 
 	// Zero all registers not holding state intended for caller; see atlas below
 .Lswitch_callee_dead_zeros:
@@ -991,12 +1096,10 @@ exception_entry_asm:
 	csc                ct0, TrustedStack_offset_mepcc(csp)
 	csrr               t1, mstatus
 	csw                t1, TrustedStack_offset_mstatus(csp)
-#ifdef CONFIG_MSHWM
 	csrr               t1, CSR_MSHWM
 	csw                t1, TrustedStack_offset_mshwm(csp)
 	csrr               t1, CSR_MSHWMB
 	csw                t1, TrustedStack_offset_mshwmb(csp)
-#endif
 	csrr               t1, mcause
 	csw                t1, TrustedStack_offset_mcause(csp)
 	// Atlas update: t1: copy of mcause
@@ -1122,6 +1225,21 @@ exception_entry_asm:
 	 * Atlas update: mtdc: TrustedStack pointer
 	 */
 
+#if __has_include(<platform-switcher_cpu_features.hh>)
+	/*
+	 * This is, uniquely of all paths into .Lcommon_context_install, potentially
+	 * a cross-thread switch.  Restore the cpuFeatures value from the
+	 * innermost compartment invocation.
+	 *
+	 * Recall "The TrustedStack::frameoffset Invariants".
+	 */
+	clhu               s0, TrustedStack_offset_frameoffset(csp)
+	cincoffset         cs0, csp, s0
+	clhu               s0, (TrustedStackFrame_offset_cpuFeatures - \
+	                           TrustedStackFrame_size)(cs0)
+	platform_switcher_cpu_features_activate s0, s1
+#endif
+
 	/*
 	 * Environment call from M-mode is exception code 11.
 	 * We need to skip the ecall instruction to avoid an infinite loop.
@@ -1153,12 +1271,10 @@ exception_entry_asm:
 	 */
 	clw                ra, TrustedStack_offset_mstatus(csp)
 	csrw               mstatus, ra
-#ifdef CONFIG_MSHWM
 	clw                ra, TrustedStack_offset_mshwm(csp)
 	csrw               CSR_MSHWM, ra
 	clw                ra, TrustedStack_offset_mshwmb(csp)
 	csrw               CSR_MSHWMB, ra
-#endif
 	cspecialw          mepcc, ct2
 
 	/*
@@ -1248,6 +1364,9 @@ exception_entry_asm:
 	 * pointing at TrustedStack::frames[0] -- that is, if the stack has no
 	 * active frames on it -- then just go back to the context we came from,
 	 * effectively parking this thread in a (slow) infinite loop.
+	 *
+	 * TODO: For formal verification, prove that this branch will never be taken
+	 * in a correctly initialized system.
 	 */
 	clhu               tp, TrustedStack_offset_frameoffset(csp)
 	li                 t1, TrustedStack_offset_frames
@@ -1628,7 +1747,6 @@ exception_entry_asm:
 
 	cspecialr          ct1, mtdc
 	// Atlas update: t1: pointer to TrustedStack
-#ifdef CONFIG_MSHWM
 	/*
 	 * Update the spilled copy of the stack high water mark to ensure that we
 	 * will clear all of the stack used by the error handler and the spilled
@@ -1636,7 +1754,6 @@ exception_entry_asm:
 	 */
 	csrr               t0, CSR_MSHWM
 	csw                t0, TrustedStack_offset_mshwm(ct1)
-#endif
 	clhu               tp, TrustedStack_offset_frameoffset(ct1)
 	addi               tp, tp, -TrustedStackFrame_size
 	// Atlas update: tp: pointer to the current available trusted stack frame.
@@ -2028,6 +2145,71 @@ __Z39switcher_handler_invocation_count_resetv:
 	li                 a1, 0
 	cret
 
+// Read and update the current compartment activation's cpuFeatures value
+	.section .text, "ax", @progbits
+	.p2align 2
+	.type __Z36switcher_invocation_cpu_features_setjj,@function
+__Z36switcher_invocation_cpu_features_setjj:
+	/*
+	 * FROM: malice
+	 * IRQ ASSUME: deferred
+	 * LIVE IN: mtdc, callee-save, ra
+	 *
+	 * Atlas:
+	 *   mtdc: pointer to TrustedStack (or nullptr if buggy scheduler)
+	 *   ra: return pointer (guaranteed because this symbol is reachable only
+	 *       through an interrupt-disabling forward-arc sentry)
+	 *
+	 *   a0; cpuFeatures AND mask
+	 *   a1; cpuFeatures OR mask
+	 *
+	 * Specifically, computes, stores, and activates:
+	 *
+	 *   frame->cpuFeatures =
+	 *     platform_switcher_cpu_features_mask(frame->cpuFeatures & a0) | a1;
+	 */
+
+	cspecialr          ca3, mtdc
+	// Atlas update: a3: copy of mtdc
+	clhu               a2, TrustedStack_offset_frameoffset(ca3)
+	addi               a2, a2, -TrustedStackFrame_size
+	// Atlas update: a2: offset of the current trusted stack frame
+	cincoffset         ca3, ca3, a2
+	/*
+	 * Atlas update:
+	 *  a3: pointer to current TrustedStack::frame
+	 *  a2: dead
+	 */
+	clhu               a2, TrustedStackFrame_offset_cpuFeatures(ca3)
+	// Atlas update: a2: current cpuFeatures value
+
+	// Compute the new value from arguments
+	and                a0, a0, a2
+	or                 a1, a0, a1
+	move               a0, a2
+#if __has_include(<platform-switcher_cpu_features.hh>)
+	platform_switcher_cpu_features_mask a1, a2
+#endif
+	/*
+	 * Atlas update:
+	 *  a0: original cpuFeatures value
+	 *  a1: updated cpuFeatures value
+	 *  a2: dead
+	 */
+
+	// Store the updated value back
+	csh                a1, TrustedStackFrame_offset_cpuFeatures(ca3)
+	zeroOne            a3
+	// Atlas update: a3: zeroed
+
+	// Activate the updated value
+#if __has_include(<platform-switcher_cpu_features.hh>)
+	platform_switcher_cpu_features_activate a1, a2
+#endif
+	// Atlas update: a1, a2: dead, safe to return
+
+	cret
+
 // The linker expects export tables to start with space for cgp and pcc, then
 // the compartment error handler.  We should eventually remove that requirement
 // for library export tables, but since they don't consume RAM after loading
@@ -2064,3 +2246,4 @@ export __Z28switcher_thread_hazard_slotsv
 export __Z13thread_id_getv
 export __Z25stack_lowest_used_addressv
 export __Z39switcher_handler_invocation_count_resetv
+export __Z36switcher_invocation_cpu_features_setjj

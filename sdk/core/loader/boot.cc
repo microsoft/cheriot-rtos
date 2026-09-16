@@ -11,7 +11,6 @@
 #include <string.h>
 
 #include "../allocator/token_types.h"
-#include "../switcher/tstack.h"
 #include "constants.h"
 #include "debug.hh"
 #include "defines.h"
@@ -25,14 +24,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#if __has_include(<platform-switcher_cpu_features.hh>)
+#	include <platform-switcher_cpu_features.hh>
+#endif
+
 using namespace CHERI;
 
 namespace
 {
 	__BEGIN_DECLS
-	static_assert(CheckSize<CHERIOT_LOADER_TRUSTED_SPILL_SIZE,
-	                        sizeof(TrustedStackGeneric<0>)>::Value,
-	              "Boot trusted stack sizes do not match.");
 	// It must also be aligned sufficiently for trusted stacks, so ensure that
 	// we've captured that requirement above.
 	static_assert(alignof(TrustedStack) <= 16);
@@ -1072,10 +1072,8 @@ namespace
 			{
 				threadTStack->mstatus &= ~MSTATUS_MPIE;
 			}
-#ifdef CONFIG_MSHWM
 			threadTStack->mshwm  = stack.top();
 			threadTStack->mshwmb = stack.base();
-#endif
 			// Set the thread ID that the switcher will return for this thread.
 			// This is indexed from 1, so 0 can be used to indicate the idle
 			// thread.
@@ -1086,6 +1084,10 @@ namespace
 			  build(compartment.exportTable);
 			// Special case: The first frame has the initial csp.
 			threadTStack->frames[0].csp = stack;
+
+#if __has_include(<platform-switcher_cpu_features.hh>)
+			threadTStack->frames[0].cpuFeatures = SWITCHER_CPU_FEATURE_DEFAULT;
+#endif
 
 			Debug::log("Thread's trusted stack is {}", threadTStack);
 
